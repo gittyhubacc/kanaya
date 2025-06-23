@@ -1,5 +1,5 @@
 # Kanaya
-Simple, unoptimized regular expression engine written for learning purposes. Kanaya generates it's LR(1) parser from a grammar, then takes a regular expression's parse tree to an equivalent non-deterministic finite automata, then computes the automata's acceptance of stdin.
+Simple, unoptimized regular expression engine written for learning purposes. Kanaya generates it's LR(1) parser from a grammar, then takes a regular expression's parse tree to an equivalent non-deterministic finite automata, then computes the automata's acceptance of stdin. It's a transparent example of two important classes of automata, non-deterministic finite automaton (NFA, for recognizing w/stdin as a member in re/argument) and a non-deterministic push down automaton (PDA, for taking the regular expression to a parse tree), as well as a demonstration of deriving an NFA from a regular expression.
 
 ## Grammar
 The grammar of the regular expressions recognized by kanaya is as follows:
