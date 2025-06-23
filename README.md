@@ -7,7 +7,7 @@ The grammar of the regular expressions recognized by kanaya is as follows:
 P -> 'a' | ... | 'z' | 'A' | ... | 'Z' | '0' | ... | '1' | (Q)
 S -> P | S*
 T -> S | T.S
-Q -> Q | Q+T
+Q -> T | Q+T
 ```
 This grammar while in bnf is virtually identical to the one that's augmented and used to generate kanaya's parser. you can see it in code with the name `kanaya_grammar`.
 
