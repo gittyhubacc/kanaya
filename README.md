@@ -9,7 +9,7 @@ S -> P | S*
 T -> S | T.S
 Q -> T | Q+T
 ```
-This grammar while in bnf is virtually identical to the one that's augmented and used to generate kanaya's parser. you can see it in code with the name `kanaya_grammar`.
+This grammar while bnf-ish is virtually identical to the one that's augmented and used to generate kanaya's parser. you can see it in code with the name `kanaya_grammar`.
 
 
 ## Building
