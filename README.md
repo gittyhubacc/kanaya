@@ -2,7 +2,7 @@
 Simple, unoptimized regular expression engine written for learning purposes. Kanaya takes a regular expression's LR(1) parse tree to an equivalent non-deterministic finite automata, then computes the automata's acceptance of stdin.
 
 ## Building
-You are sort of out of luck, because this project depends on a personal library I haven't published for little things like a string type and some memory functions. Sorry! You should still be able to use it to see an example of both LR(1) parsing, and taking a regular expression to nfa. 
+You are sort of out of luck, because this project depends on a personal library I haven't published for little things like a string type and some memory functions. Sorry! You should still be able to use it to see an example of both generating an LR(1) parser from a grammar, and taking a regular expression to nfa. 
 
 ## Examples
 I still wana show off what it can do though.
