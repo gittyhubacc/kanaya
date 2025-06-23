@@ -1,6 +1,17 @@
 # Kanaya
 Simple, unoptimized regular expression engine written for learning purposes. Kanaya generates it's LR(1) parser from a grammar, then takes a regular expression's parse tree to an equivalent non-deterministic finite automata, then computes the automata's acceptance of stdin.
 
+## Grammar
+The grammar of the regular expressions recognized by kanaya is as follows:
+```
+P -> 'a' | ... | 'z' | 'A' | ... | 'Z' | '0' | ... | '1' | (Q)
+S -> P | S*
+T -> S | T.S
+Q -> Q | Q+T
+```
+This grammar while in bnf is virtually identical to the one that's augmented and used to generate kanaya's parser. you can see it in code with the name `kanaya_grammar`.
+
+
 ## Building
 You are sort of out of luck, because this project depends on a personal library I haven't published for little things like a string type and some memory functions. Sorry! You should still be able to use it to see an example of both generating an LR(1) parser from a grammar, and taking a regular expression to nfa. 
 
