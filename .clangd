@@ -1,0 +1,3 @@
+Diagnostics:
+  Suppress: ['-Wint-to-void-pointer-cast', '-Wvoid-pointer-to-int-cast']
+

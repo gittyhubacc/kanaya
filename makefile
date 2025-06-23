@@ -1,5 +1,5 @@
 CC := clang
-CFLAGS := -g -O0
+CFLAGS := -g -O0 -Wno-int-to-void-pointer-cast -Wno-void-pointer-to-int-cast
 LDFLAGS := -lmf
 
 BIN_NAME := kanaya

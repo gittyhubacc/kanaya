@@ -1,8 +1,21 @@
 #include <mf/array.h>
+#include <mf/dprh.h>
 #include <mf/list.h>
 #include <mf/memory.h>
 #include <mf/string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct program_input {
+        string re;
+        string w;
+} program_input;
+
+typedef struct program_output {
+        int accepted;
+        int bytes_used;
+} program_output;
 
 typedef enum token_type {
         TOK_BROKEN,
@@ -67,8 +80,252 @@ typedef struct parser {
         ptree *nodes[PARSER_SZ];
 } parser;
 
+#define EPSILON (0x02)
+typedef struct nfa_arrow {
+        int state;
+        int input;
+        int dest;
+} nfa_arrow;
+
+typedef struct nfa_delta {
+        int rule_cnt;
+        nfa_arrow *rules;
+} nfa_delta;
+
+typedef struct nfa {
+        int start;
+        int accept;
+        nfa_delta delta;
+} nfa;
+
+typedef struct nfa_entry {
+        unsigned int hash;
+        nfa n;
+} nfa_entry;
+
+typedef list *nfa_id;
+
+static void nfa_id_append(nfa_id *head, nfa_id node)
+{
+        list_append(head, node);
+}
+
+static void print_nfa_id(nfa_id id)
+{
+
+        nfa_id cursor;
+        cursor = id;
+        if (!cursor) {
+                printf("null boy\n");
+                return;
+        }
+        printf("-> %i", (int)cursor->data);
+        cursor = cursor->next;
+        while (cursor) {
+                printf(", %i", (int)cursor->data);
+                cursor = cursor->next;
+        }
+        printf("\n");
+}
+
+static nfa_id nfa_eclose(arena *a, nfa_delta d, nfa_id id)
+{
+        int state;
+        list *node;
+        int updated = 1;
+        nfa_id res = NULL;
+        nfa_id cursor = id;
+
+        // add every state we're already in
+        while (cursor) {
+                state = (int)cursor->data;
+                node = make(a, list, 1);
+                node->data = (void *)state;
+                nfa_id_append(&res, node);
+                cursor = cursor->next;
+        }
+
+        // now close this list
+        cursor = res;
+        while (cursor) {
+                state = (int)cursor->data;
+                for (int i = 0; i < d.rule_cnt; i++) {
+                        if (d.rules[i].state == state &&
+                            d.rules[i].input == EPSILON) {
+                                // printf("%i + %i -> %i\n", d.rules[i].state,
+                                // d.rules[i].input, d.rules[i].dest);
+                                node = make(a, list, 1);
+                                node->data = (void *)d.rules[i].dest;
+                                nfa_id_append(&res, node);
+                        }
+                }
+                cursor = cursor->next;
+        }
+        // print_nfa_id(res);
+
+        return res;
+}
+
+static nfa_id nfa_step(arena *a, nfa_delta d, nfa_id id, int input)
+{
+        int state;
+        list *node;
+        list *new = NULL;
+        nfa_id cursor = nfa_eclose(a, d, id);
+        // printf("nfa_step(%c)\n", input);
+        while (cursor) {
+                state = (int)cursor->data;
+                // printf("check %i %i\n", state, input);
+                for (int i = 0; i < d.rule_cnt; i++) {
+                        // printf("\tlooking %i %i\n", d.rules[i].state,
+                        // d.rules[i].input);
+                        if (d.rules[i].state == state &&
+                            d.rules[i].input == input) {
+                                node = make(a, list, 1);
+                                node->data = (void *)d.rules[i].dest;
+                                nfa_id_append(&new, node);
+                        }
+                }
+                cursor = cursor->next;
+        }
+        return new;
+}
+
+static int nfa_test(arena *a, nfa n, string input)
+{
+        nfa_id id;
+        nfa_id id_list = NULL;
+
+        id = make(a, list, 1);
+        id->data = (void *)n.start;
+        nfa_id_append(&id_list, id);
+
+        // print_nfa_id(id_list);
+        for (int i = 0; i < input.len; i++) {
+                id_list = nfa_step(a, n.delta, id_list, input.addr[i]);
+                // print_nfa_id(id_list);
+        }
+        id = nfa_eclose(a, n.delta, id_list);
+        while (id) {
+                if (id->data == (void *)n.accept) {
+                        return 1;
+                }
+                id = id->next;
+        }
+        // printf("nope %i\n", n.accept);
+        return 0;
+}
+
+static nfa nfa_union(arena *a, nfa s, nfa r)
+{
+        nfa n;
+        list *cursor;
+        int scnt = s.delta.rule_cnt;
+        int rcnt = r.delta.rule_cnt;
+
+        n.start = 0;
+        n.accept = (s.accept + 1) + (r.accept + 1) + 1;
+        n.delta.rule_cnt = scnt + rcnt + 4;
+        n.delta.rules = make(a, nfa_arrow, n.delta.rule_cnt);
+
+        for (int i = 0; i < s.delta.rule_cnt; i++) {
+                n.delta.rules[i] = s.delta.rules[i];
+                n.delta.rules[i].state += 1;
+                n.delta.rules[i].dest += 1;
+        }
+
+        for (int i = 0; i < r.delta.rule_cnt; i++) {
+                n.delta.rules[i + scnt] = r.delta.rules[i];
+                n.delta.rules[i + scnt].state += s.accept + 2;
+                n.delta.rules[i + scnt].dest += s.accept + 2;
+        }
+
+        n.delta.rules[0 + scnt + rcnt].state = n.start;
+        n.delta.rules[0 + scnt + rcnt].input = EPSILON;
+        n.delta.rules[0 + scnt + rcnt].dest = s.start + 1;
+
+        n.delta.rules[1 + scnt + rcnt].state = n.start;
+        n.delta.rules[1 + scnt + rcnt].input = EPSILON;
+        n.delta.rules[1 + scnt + rcnt].dest = r.start + s.accept + 2;
+
+        n.delta.rules[2 + scnt + rcnt].state = s.accept + 1;
+        n.delta.rules[2 + scnt + rcnt].input = EPSILON;
+        n.delta.rules[2 + scnt + rcnt].dest = n.accept;
+
+        n.delta.rules[3 + scnt + rcnt].state = r.accept + s.accept + 2;
+        n.delta.rules[3 + scnt + rcnt].input = EPSILON;
+        n.delta.rules[3 + scnt + rcnt].dest = n.accept;
+
+        return n;
+}
+
+static nfa nfa_concat(arena *a, nfa r, nfa s)
+{
+        nfa n;
+        list *cursor;
+        int scnt = s.delta.rule_cnt;
+        int rcnt = r.delta.rule_cnt;
+
+        n.start = s.start;
+        n.accept = r.accept + s.accept + 1;
+        n.delta.rule_cnt = scnt + rcnt + 1;
+        n.delta.rules = make(a, nfa_arrow, n.delta.rule_cnt);
+
+        for (int i = 0; i < scnt; i++) {
+                n.delta.rules[i] = s.delta.rules[i];
+        }
+
+        for (int i = 0; i < rcnt; i++) {
+                n.delta.rules[i + scnt] = r.delta.rules[i];
+                n.delta.rules[i + scnt].state += s.accept + 1;
+                n.delta.rules[i + scnt].dest += s.accept + 1;
+        }
+
+        n.delta.rules[scnt + rcnt].state = s.accept;
+        n.delta.rules[scnt + rcnt].input = EPSILON;
+        n.delta.rules[scnt + rcnt].dest = r.start + s.accept + 1;
+
+        return n;
+}
+
+static nfa nfa_close(arena *a, nfa r)
+{
+        nfa n;
+        list *cursor;
+        int rcnt = r.delta.rule_cnt;
+
+        n.start = 0;
+        n.accept = (r.accept + 1) + 1;
+        n.delta.rule_cnt = rcnt + 4;
+        n.delta.rules = make(a, nfa_arrow, n.delta.rule_cnt);
+
+        for (int i = 0; i < rcnt; i++) {
+                n.delta.rules[i] = r.delta.rules[i];
+                n.delta.rules[i].state += 1;
+                n.delta.rules[i].dest += 1;
+        }
+
+        n.delta.rules[0 + rcnt].state = n.start;
+        n.delta.rules[0 + rcnt].input = EPSILON;
+        n.delta.rules[0 + rcnt].dest = r.start + 1;
+
+        n.delta.rules[1 + rcnt].state = n.start;
+        n.delta.rules[1 + rcnt].input = EPSILON;
+        n.delta.rules[1 + rcnt].dest = n.accept;
+
+        n.delta.rules[2 + rcnt].state = r.accept + 1;
+        n.delta.rules[2 + rcnt].input = EPSILON;
+        n.delta.rules[2 + rcnt].dest = r.start + 1;
+
+        n.delta.rules[3 + rcnt].state = r.accept + 1;
+        n.delta.rules[3 + rcnt].input = EPSILON;
+        n.delta.rules[3 + rcnt].dest = n.accept;
+
+        return n;
+}
+
 #define PART_SZ (kibibyte / 2)
-static string read_source(arena *a, int argc, char **argv)
+static struct program_input read_input(arena *a, int argc, char **argv)
 {
         char c = 0;
         int parts_read = 0;
@@ -85,9 +342,27 @@ static string read_source(arena *a, int argc, char **argv)
                 }
         }
 
-        return (string){buffer, parts_read * PART_SZ + bytes_read};
+        program_input i = {
+            .re = (string){.addr = argv[1], .len = strlen(argv[1])},
+            .w = (string){buffer, parts_read * PART_SZ + bytes_read},
+        };
+        if (i.w.addr[i.w.len - 1] == '\n') {
+                i.w.len--;
+        }
+        return i;
 }
-#define IS_SYMBOL(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+
+const char *fmt = "accepted: %i, used: %lu, %lukib\n";
+static int write_output(program_output output, int argc, char **argv)
+{
+        printf(fmt, output.accepted, output.bytes_used,
+               output.bytes_used / kibibyte);
+        return output.accepted;
+}
+
+#define IS_SYMBOL(c)                                                           \
+        ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||                   \
+         (c >= '0' && c <= '9'))
 static token emit_token(string source, int *i)
 {
         token tok;
@@ -145,17 +420,6 @@ static tstring lex(arena *a, string source)
         res.addr[res.len++] = (token){.type = TOK_OVER, .data = '$'};
 
         return res;
-}
-
-static void debug_tokens(tstring tokens)
-{
-        int type;
-        char c;
-        for (int i = 0; i < tokens.len; i++) {
-                type = tokens.addr[i].type;
-                c = tokens.addr[i].data;
-                printf("%c %i\n", c >= ' ' ? c : ' ', c);
-        }
 }
 
 static int tstreq(tstring left, tstring right)
@@ -389,6 +653,71 @@ static void print_state(list *state)
         }
 }
 
+#define NFA_EXP (7)
+#define NFA_CNT (1 << NFA_EXP)
+static nfa_entry nfas[NFA_CNT];
+
+static void setup_nfa(arena *a, char c)
+{
+        nfa_arrow *arrow = make(a, nfa_arrow, 1);
+        arrow->input = c;
+        arrow->state = 0;
+        arrow->dest = 1;
+
+        string key;
+        key.len = 1;
+        key.addr = make(a, char, 1);
+        key.addr[0] = c;
+
+        unsigned int hash = dprh_hash(key);
+        int idx = dprh_index(hash, NFA_EXP, hash);
+        while (nfas[idx].hash) {
+                idx = dprh_index(hash, NFA_EXP, idx);
+        }
+
+        nfas[idx].hash = hash;
+        nfas[idx].n = (nfa){
+            .start = 0,
+            .accept = 1,
+            .delta =
+                (nfa_delta){
+                    .rule_cnt = 1,
+                    .rules = arrow,
+                },
+        };
+}
+
+static nfa *find_nfa(string key)
+{
+        unsigned int hash = dprh_hash(key);
+        int idx = dprh_index(hash, NFA_EXP, hash);
+        while (nfas[idx].hash) {
+                if (nfas[idx].hash == hash) {
+                        return &nfas[idx].n;
+                }
+                idx = dprh_index(hash, NFA_EXP, idx);
+        }
+        return NULL;
+}
+
+static void setup_nfas(arena *a)
+{
+        int idx;
+        string key;
+        unsigned int hash;
+        nfa_arrow *arrow;
+        mfmemset(nfas, 0, sizeof(nfas));
+        for (int c = 'a'; c <= 'z'; c++) {
+                setup_nfa(a, c);
+        }
+        for (int c = 'A'; c <= 'Z'; c++) {
+                setup_nfa(a, c);
+        }
+        for (int c = '0'; c <= '9'; c++) {
+                setup_nfa(a, c);
+        }
+}
+
 static token primary_sym[] = {T(TOK_SYMBOL)};
 static token primary_group[] = {
     T(TOK_GROUP_BEGIN),
@@ -473,17 +802,11 @@ static ptree *parse(arena *a, grammar *g, tstring tokens)
         pid *p;
         ptree *n;
         int i = 0;
-        list *state = prsr.sym[prsr.s - 1];
-        while (state) {
-                state = prsr.sym[prsr.s - 1];
-                if (state == NULL) {
-                        printf("dead\n");
-                        return NULL;
-                }
-
+        list *state;
+        while ((state = prsr.sym[prsr.s - 1])) {
                 // print_state(state);
                 if (i >= tokens.len) {
-                        printf("accepted\n");
+                        // printf("parser accepted\n");
                         return prsr.nodes[prsr.n - 1];
                 }
 
@@ -509,30 +832,60 @@ static ptree *parse(arena *a, grammar *g, tstring tokens)
                 }
                 shift(a, &prsr, g, tokens.addr[i++]);
         }
-        printf("how did we get here?\n");
+        // printf("parser dead\n");
         return NULL;
 }
 
-static void debug_ptree(ptree *pt, int generation)
+static nfa kanaya(arena *a, ptree *tree)
 {
-        // char c = pt->label.type;
-        char c = pt->label.data >= ' ' ? pt->label.data : ' ';
-        printf("%i: %c (%i)\n", generation, c, pt->label.data);
-        for (int i = 0; i < pt->child_cnt; i++) {
-                debug_ptree(pt->children + i, generation + 1);
+        if (tree->child_cnt == 1) {
+                if (tree->children[0].label.type == TOK_SYMBOL) {
+                        char *addr = make(a, char, 1);
+                        string key = (string){.len = 1, .addr = addr};
+                        key.addr[0] = tree->children[0].label.data;
+                        return *find_nfa(key);
+                }
+                return kanaya(a, tree->children);
+        } else if (tree->child_cnt == 2) {
+                return nfa_close(a, kanaya(a, tree->children));
         }
+
+        if (tree->children[0].label.type == TOK_GROUP_BEGIN) {
+                return kanaya(a, tree->children + 1);
+        } else {
+                nfa left = kanaya(a, tree->children + 0);
+                nfa right = kanaya(a, tree->children + 2);
+                if (tree->children[1].label.type == TOK_CONCAT) {
+                        return nfa_concat(a, left, right);
+                } else if (tree->children[1].label.type == TOK_UNION) {
+                        return nfa_union(a, left, right);
+                }
+        }
+
+        printf("oh shit\n");
+        return (nfa){};
 }
 
 int main(int argc, char **argv)
 {
-        char mem[256 * kibibyte];
-        arena root = make_arena(mem);
-        string source = read_source(&root, argc, argv);
-        tstring tokens = lex(&root, source);
-        debug_tokens(tokens);
+        int root_sz = 4 * mebibyte;
+        char *mem = malloc(root_sz);
+        arena root = make_arena_ptr(mem, root_sz);
+
+        setup_nfas(&root);
+
+        program_input input = read_input(&root, argc, argv);
+
+        tstring tokens = lex(&root, input.re);
         ptree *tree = parse(&root, &kanaya_grammar, tokens);
-        debug_ptree(tree, 0);
-        printf("used: %lu, %lukib\n", bytes_used(root),
-               bytes_used(root) / kibibyte);
-        return 0;
+        nfa n = kanaya(&root, tree);
+        int accepted = nfa_test(&root, n, input.w);
+        program_output output = {
+            .accepted = accepted,
+            .bytes_used = bytes_used(root),
+        };
+
+        free(mem);
+
+        return write_output(output, argc, argv);
 }
