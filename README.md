@@ -13,10 +13,9 @@ This grammar while bnf-ish is virtually identical to the one that's augmented an
 
 
 ## Building
-You are sort of out of luck, because this project depends on a personal library I haven't published for little things like a string type and some memory functions. Sorry! You should still be able to use it to see an example of both generating an LR(1) parser from a grammar, and taking a regular expression to nfa. 
+Look at my other repository circes. This project needs to be linked with that one.
 
 ## Examples
-I still wana show off what it can do though.
 
 ```
 $ echo xyyyyyyyy | ./bin/kanaya 'x.(y*+z)'
